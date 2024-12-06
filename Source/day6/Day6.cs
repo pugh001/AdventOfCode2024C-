@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using AOC2024.Utility;
 
 namespace AOC2024;
@@ -13,10 +14,7 @@ public class Day6
 
     private static long ProcessPart1(string[] data)
     {
-        long visitedPositions = 0;
-        var (grid, guardRow, guardCol) = InitializeGrid(data);
-
-        string directions = "^>v<";
+        (char[,] grid, int guardRow, int guardCol) = InitializeGrid(data);
         (int, int)[] deltas = { (-1, 0), (0, 1), (1, 0), (0, -1) };
         int dirIndex = 0;
 
@@ -41,35 +39,31 @@ public class Day6
             if (IsOutOfBounds(newRow, newCol, grid))
                 break;
         }
-
-        // Count visited positions
-        foreach (var cell in grid)
-            if (cell == 'X')
-                visitedPositions++;
-
-        return visitedPositions;
+        return grid.Cast<char>().LongCount(cell => cell == 'X');
     }
 
     private static long ProcessPart2(string[] data)
     {
         long obstructionCount = 0;
-        var (grid, guardRow, guardCol) = InitializeGrid(data);
+        (char[,] grid, int guardRow, int guardCol) = InitializeGrid(data);
 
-        string directions = "^>v<";
-        (int, int)[] deltas = { (-1, 0), (0, 1), (1, 0), (0, -1) };
+        // Precompute reachable cells
+        bool[,] reachable = ComputeReachable(grid, guardRow, guardCol);
 
-        // Find possible obstruction locations
-        for (int i = 0; i < grid.GetLength(0); i++)
+        // Parallelized simulation for obstruction
+        Parallel.For(0, grid.GetLength(0), i =>
         {
             for (int j = 0; j < grid.GetLength(1); j++)
             {
-                if (grid[i, j] != '.' || (i == guardRow && j == guardCol))
+                if (!reachable[i, j] || grid[i, j] != '.')
                     continue;
 
-                if (SimulateGuardMovement(i, j, grid, guardRow, guardCol, deltas))
-                    obstructionCount++;
+                grid[i, j] = '#'; // Temporarily place obstruction
+                if (SimulateGuardMovement(guardRow, guardCol, grid))
+                    Interlocked.Increment(ref obstructionCount);
+                grid[i, j] = '.'; // Revert obstruction
             }
-        }
+        });
 
         return obstructionCount;
     }
@@ -86,34 +80,52 @@ public class Day6
             for (int j = 0; j < cols; j++)
             {
                 grid[i, j] = data[i][j];
-                if (grid[i, j] == '^')
-                {
-                    guardRow = i;
-                    guardCol = j;
-                    grid[i, j] = '.'; // Remove guard marker
-                }
+                if (grid[i, j] != '^')
+                    continue;
+
+                guardRow = i;
+                guardCol = j;
+                grid[i, j] = '.'; // Remove guard marker
             }
         }
 
         return (grid, guardRow, guardCol);
     }
 
-    private static bool SimulateGuardMovement(
-        int obstructionRow,
-        int obstructionCol,
-        char[,] grid,
-        int guardRow,
-        int guardCol,
-        (int, int)[] deltas)
+    private static bool[,] ComputeReachable(char[,] grid, int guardRow, int guardCol)
     {
-        char[,] simulationGrid = (char[,])grid.Clone();
-        simulationGrid[obstructionRow, obstructionCol] = '#';
+        bool[,] reachable = new bool[grid.GetLength(0), grid.GetLength(1)];
+        Queue<(int, int)> queue = new();
+        queue.Enqueue((guardRow, guardCol));
+        (int, int)[] deltas = { (-1, 0), (0, 1), (1, 0), (0, -1) };
 
+        while (queue.Count > 0)
+        {
+            var (row, col) = queue.Dequeue();
+            if (reachable[row, col])
+                continue;
+
+            reachable[row, col] = true;
+
+            foreach (var (dr, dc) in deltas)
+            {
+                int newRow = row + dr, newCol = col + dc;
+                if (!IsOutOfBounds(newRow, newCol, grid) && grid[newRow, newCol] == '.' && !reachable[newRow, newCol])
+                    queue.Enqueue((newRow, newCol));
+            }
+        }
+
+        return reachable;
+    }
+
+    private static bool SimulateGuardMovement(int guardRow, int guardCol, char[,] grid)
+    {
+        (int, int)[] deltas = { (-1, 0), (0, 1), (1, 0), (0, -1) };
         int currentRow = guardRow;
         int currentCol = guardCol;
         int dirIndex = 0;
-        HashSet<(int, int, int)> visited = new();
 
+        HashSet<int> visited = new();
         while (true)
         {
             int newRow = currentRow + deltas[dirIndex].Item1;
@@ -122,7 +134,7 @@ public class Day6
             if (IsOutOfBounds(newRow, newCol, grid))
                 return false;
 
-            if (simulationGrid[newRow, newCol] == '#')
+            if (grid[newRow, newCol] == '#')
             {
                 // Turn right if blocked
                 dirIndex = (dirIndex + 1) % 4;
@@ -134,8 +146,9 @@ public class Day6
                 currentCol = newCol;
             }
 
-            // Check for loop
-            if (!visited.Add((currentRow, currentCol, dirIndex)))
+            // Check for loop using a compact state representation
+            int state = (currentRow << 16) | (currentCol << 8) | dirIndex;
+            if (!visited.Add(state))
                 return true; // Loop detected
         }
     }
