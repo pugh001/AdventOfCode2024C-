@@ -1,9 +1,8 @@
-﻿using System.Runtime.InteropServices.JavaScript;
-using AOC2024.Utility;
+﻿using AOC2024.Utility;
 
 namespace AOC2024;
 
-static internal class Program
+static internal partial class Program
 {
   public static void Main(string[] args)
   {
@@ -18,9 +17,9 @@ static internal class Program
         Console.Write("Day " + day + ":");
         var startTime = DateTime.Now;
         Console.Write(dayInstance.GetType().GetMethod("Process").Invoke(dayInstance, new object[] { inputFilePath }));
-        Console.Write("  Time: " + DateTime.Now.Subtract(startTime));        
+        Console.Write("  Time: " + DateTime.Now.Subtract(startTime));
       }
-      catch(InvalidOperationException)
+      catch (InvalidOperationException)
       {
         //No Day# code yet
         Console.Write(".");
